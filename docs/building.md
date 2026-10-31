@@ -65,6 +65,10 @@ node app/e2e/smoke.mjs /tmp/demo-project [screenshotDir]
 node app/e2e/groovy.mjs /tmp/demo-project [screenshotDir]
 ```
 
+With `CPIWB_IFLOW_ZIP` set to a zip of `engine/core/src/test/resources/iflow`, `groovy.mjs` also imports
+that iFlow and opens its Groovy and Content Modifier steps. CI does this; locally:
+`jar --create --no-manifest --file /tmp/iflow.zip -C engine/core/src/test/resources/iflow .`
+
 ## CI and installers
 
 `.github/workflows/build.yml`:
@@ -79,6 +83,9 @@ The macOS runner is `macos-26`; `MACOSX_DEPLOYMENT_TARGET=11.0` (for native-imag
 `-mmacosx-version-min`) keeps the app and the native engines starting on
 macOS 11 (the app's `minimumSystemVersion`), and a CI step checks that. The Linux bundles are built on
 `ubuntu-22.04` on purpose, so they need only that release's glibc.
+
+The workflow artifacts (engine jars, installers) expire after 3 days; a tag's installers stay 90 days,
+and the release keeps its own copies.
 
 Native images must be built on each target OS; there is no cross-compilation.
 The installers are not code-signed yet. On macOS the app is signed ad hoc (`signingIdentity: "-"`,

@@ -24,6 +24,9 @@ public final class XmlEngine implements RpcHandler {
     private final XsltStep xslt = new XsltStep();
     private final XsdStep xsd = new XsdStep();
     private final XPathStep xpath = new XPathStep();
+    private final SplitStep split = new SplitStep();
+    private final FilterStep filter = new FilterStep();
+    private final GatherStep gather = new GatherStep();
     private final ProjectFiles files = new ProjectFiles();
 
     @Override
@@ -37,7 +40,7 @@ public final class XmlEngine implements RpcHandler {
                 .with("java", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"))
                 .with("nativeImage", System.getProperty("org.graalvm.nativeimage.imagecode") != null)
                 .with("types", TypedValue.TYPES)
-                .with("methods", List.of("engine.info", "xslt.run", "xsd.validate", "xpath.eval", "xml.format",
+                .with("methods", List.of("engine.info", "xslt.run", "xsd.validate", "xpath.eval", "split.run", "filter.run", "gather.run", "xml.format",
                         "project.open", "project.close", "project.list", "file.read", "file.write", "file.delete", "iflow.import", "iflow.steps", "tests.run"));
     }
 
@@ -53,6 +56,12 @@ public final class XmlEngine implements RpcHandler {
                 return xsd.run(withProjectRoot(params));
             case "xpath.eval":
                 return xpath.run(withProjectRoot(params));
+            case "split.run":
+                return split.run(withProjectRoot(params));
+            case "filter.run":
+                return filter.run(withProjectRoot(params));
+            case "gather.run":
+                return gather.run(withProjectRoot(params));
             case "xml.format":
                 return xpath.format(params);
             case "project.open":

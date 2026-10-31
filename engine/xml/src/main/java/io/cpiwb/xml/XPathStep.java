@@ -5,6 +5,7 @@ import io.cpiwb.core.Json;
 import io.cpiwb.core.SimExchange;
 import net.sf.saxon.s9api.DocumentBuilder;
 import net.sf.saxon.s9api.Processor;
+import net.sf.saxon.s9api.QName;
 import net.sf.saxon.s9api.SaxonApiException;
 import net.sf.saxon.s9api.Serializer;
 import net.sf.saxon.s9api.XPathCompiler;
@@ -35,16 +36,19 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
- * XPath evaluation against the message body. Version 1.0 uses the JDK's XPath engine (as used for
- * XPath expressions in simple iFlow steps); 2.0/3.1 use Saxon. Namespace prefixes are declared like
- * the iFlow's "Namespace Mapping" setting.
+ * XPath evaluation against the message body. Version 1.0 uses the JDK's XPath engine, 3.1 uses Saxon,
+ * as CPI's Content Modifier and Router do (SAP documents XPath 3.1; F37). Namespace prefixes are declared
+ * like the iFlow's "Namespace Mapping" setting.
  */
 public final class XPathStep {
 
+    private static final Pattern NAME = Pattern.compile("[A-Za-z_][\\w.-]*");
     private final Processor processor = new Processor(false);
 
     public XPathStep() {
@@ -55,6 +59,9 @@ public final class XPathStep {
      * Request: {@code {"expression": "...", "version": "1.0"|"3.1", "namespaces": {"p": "uri"},
      * "baseDir": "/abs/project", "input": {"body": "..."}}}. {@code doc()}, {@code unparsed-text()} and
      * external entities read files inside {@code baseDir} only.
+     * <p>With {@code "as"} (XPath 3.1 only) the result also has one {@code value}, as the Flow Steps use it:
+     * {@code "boolean"} the effective boolean value (a Router condition), {@code "string"} the string value
+     * of the first item, {@code "nodes"} all items serialized (Content Modifier XPath with a DOM data type).
      */
     public synchronized Map<String, Object> run(Map<String, Object> req) {
         String baseDirStr = Json.str(req, "baseDir", null);
@@ -82,7 +89,10 @@ public final class XPathStep {
                 evalJdk(expr, ns, input.getBody(), items, resolver);
                 result.with("engine", "JDK XPath 1.0");
             } else {
-                evalSaxon(expr, ns, input.getBody(), items, resolver);
+                String value = evalSaxon(expr, ns, input, items, resolver, Json.str(req, "as", null));
+                if (value != null) {
+                    result.with("value", value);
+                }
                 result.with("engine", XsltStep.engineVersion() + " (XPath 3.1)");
             }
             result.with("ok", true);
@@ -105,23 +115,7 @@ public final class XPathStep {
         in.setSystemId(ProjectResolver.MEMORY_BASE + "input.xml");
         Document doc = builder.parse(in);
         XPath xp = XPathFactory.newDefaultInstance().newXPath();
-        xp.setNamespaceContext(new NamespaceContext() {
-            @Override
-            public String getNamespaceURI(String prefix) {
-                return ns.getOrDefault(prefix, "");
-            }
-
-            @Override
-            public String getPrefix(String uri) {
-                return ns.entrySet().stream().filter(e -> e.getValue().equals(uri)).map(Map.Entry::getKey)
-                        .findFirst().orElse(null);
-            }
-
-            @Override
-            public Iterator<String> getPrefixes(String uri) {
-                return ns.entrySet().stream().filter(e -> e.getValue().equals(uri)).map(Map.Entry::getKey).iterator();
-            }
-        });
+        xp.setNamespaceContext(namespaceContext(ns));
         XPathEvaluationResult<?> res = xp.evaluateExpression(expr, doc);
         switch (res.type()) {
             case NODESET:
@@ -146,6 +140,27 @@ public final class XPathStep {
         }
     }
 
+    /** The iFlow's namespace mapping (prefix to URI) for the JDK's XPath. */
+    static NamespaceContext namespaceContext(Map<String, String> ns) {
+        return new NamespaceContext() {
+            @Override
+            public String getNamespaceURI(String prefix) {
+                return ns.getOrDefault(prefix, "");
+            }
+
+            @Override
+            public String getPrefix(String uri) {
+                return ns.entrySet().stream().filter(e -> e.getValue().equals(uri)).map(Map.Entry::getKey)
+                        .findFirst().orElse(null);
+            }
+
+            @Override
+            public Iterator<String> getPrefixes(String uri) {
+                return ns.entrySet().stream().filter(e -> e.getValue().equals(uri)).map(Map.Entry::getKey).iterator();
+            }
+        };
+    }
+
     private static Map<String, Object> describeDom(Node n) throws Exception {
         if (n.getNodeType() == Node.ELEMENT_NODE || n.getNodeType() == Node.DOCUMENT_NODE) {
             Transformer t = TransformerFactory.newDefaultInstance().newTransformer();
@@ -158,18 +173,21 @@ public final class XPathStep {
                 .with("name", n.getNodeName()).with("value", n.getNodeValue());
     }
 
-    private void evalSaxon(String expr, Map<String, String> ns, byte[] body, List<Object> items,
-                           ProjectResolver resolver) throws SaxonApiException, TransformerException {
+    private String evalSaxon(String expr, Map<String, String> ns, SimExchange input, List<Object> items,
+                             ProjectResolver resolver, String as) throws SaxonApiException, TransformerException {
         DocumentBuilder db = processor.newDocumentBuilder();
-        XdmNode doc = db.build(resolver.source(new InputSource(new ByteArrayInputStream(body)),
+        XdmNode doc = db.build(resolver.source(new InputSource(new ByteArrayInputStream(input.getBody())),
                 ProjectResolver.MEMORY_BASE + "input.xml"));
         XPathCompiler xc = processor.newXPathCompiler();
         // Relative URIs in doc() and unparsed-text() resolve against the project folder.
         xc.setBaseURI(URI.create(resolver.resolveAgainst(".", null)));
         ns.forEach(xc::declareNamespace);
-        XPathSelector sel = xc.compile(expr).load();
+        XPathSelector sel = compile(xc, expr, input);
         sel.setURIResolver(resolver);
         sel.setContextItem(doc);
+        if ("boolean".equals(as)) {
+            return String.valueOf(sel.effectiveBooleanValue());
+        }
         XdmValue value = sel.evaluate();
         for (XdmItem item : value) {
             if (item.isAtomicValue()) {
@@ -186,6 +204,50 @@ public final class XPathStep {
             } else {
                 items.add(Json.o().with("kind", "item").with("value", item.toString()));
             }
+        }
+        if ("string".equals(as)) {
+            return value.size() == 0 ? "" : value.itemAt(0).getStringValue();
+        }
+        if ("nodes".equals(as)) {
+            StringBuilder all = new StringBuilder();
+            for (XdmItem item : value) {
+                all.append(item instanceof XdmNode ? item.toString() : item.getStringValue());
+            }
+            return all.toString();
+        }
+        return null;
+    }
+
+    /**
+     * Compiles the XPath with the message's headers and properties as variables: {@code $name} is the header
+     * of that name, else the exchange property, as Camel's XPath variable resolver (MessageVariableResolver,
+     * Camel 2.24 and 3.14) does for CPI's Filter, Router and Content Modifier. Real iFlows use it, e.g.
+     * {@code Student[Age > $AgeLimit_Header]}.
+     */
+    static XPathSelector compile(XPathCompiler xc, String expr, SimExchange input) throws SaxonApiException {
+        Map<String, Object> vars = new LinkedHashMap<>();
+        input.getProperties().forEach((k, v) -> putVariable(vars, k, v));
+        input.getHeaders().forEach((k, v) -> putVariable(vars, k, v));
+        for (String name : vars.keySet()) {
+            xc.declareVariable(new QName(name));
+        }
+        XPathSelector sel = xc.compile(expr).load();
+        for (Map.Entry<String, Object> v : vars.entrySet()) {
+            Object o = v.getValue();
+            XdmAtomicValue value;
+            try {
+                value = XdmAtomicValue.makeAtomicValue(o);
+            } catch (IllegalArgumentException e) {
+                value = new XdmAtomicValue(String.valueOf(o));
+            }
+            sel.setVariable(new QName(v.getKey()), value);
+        }
+        return sel;
+    }
+
+    private static void putVariable(Map<String, Object> vars, String name, Object value) {
+        if (value != null && name != null && NAME.matcher(name).matches()) {
+            vars.put(name, value);
         }
     }
 

@@ -26,8 +26,9 @@ await page.locator('.status', { hasText: 'engine(s) available' }).waitFor({ time
 // 1) Sample script on Groovy 1.x.
 await page.getByRole('tab', { name: 'Groovy Script' }).click();
 await page.locator('section.output .badge.ok').waitFor({ timeout: 20000 });
-const body = await page.locator('section.output .view-lines').innerText();
-if (!body.includes('ProcessedOrder')) fail('groovy output: ' + body.slice(0, 200));
+// Monaco renders the output a moment after the badge, so wait for the text itself.
+await page.locator('section.output .view-lines', { hasText: 'ProcessedOrder' }).waitFor({ timeout: 10000 })
+  .catch(async () => fail('groovy output: ' + (await page.locator('section.output .view-lines').innerText()).slice(0, 200)));
 await page.getByRole('tab', { name: /^MPL/ }).click();
 if (!(await page.locator('section.output .pad').innerText()).includes('Order')) fail('MPL property missing');
 await page.getByRole('tab', { name: /^Console/ }).click();
@@ -93,6 +94,15 @@ if (process.env.CPIWB_IFLOW_ZIP) {
   const prof = await page.getByLabel('Runtime profile').inputValue();
   if (prof !== 'groovy-2.x') fail('profile from iFlow step: ' + prof);
   if (shots) await page.screenshot({ path: path.join(shots, 'g5-iflow.png') });
+  // A Content Modifier of the iFlow opens in Flow Steps with its rows.
+  await page.locator('.steps .step', { hasText: 'Set headers' }).click();
+  await page.locator('.src', { hasText: 'Set headers' }).waitFor({ timeout: 10000 })
+    .catch(() => fail('Content Modifier from the iFlow did not open in Flow Steps'));
+  await page.locator('.steps .step', { hasText: 'Keep items' }).click();
+  if ((await page.getByLabel('Filter XPath').inputValue()) !== '/Order/Item') fail('Filter XPath from the iFlow');
+  await page.locator('.steps .step', { hasText: 'Gather items' }).click();
+  if ((await page.getByLabel('Aggregation Algorithm').inputValue()) !== 'combineAtXPath') fail('Gather algorithm from the iFlow');
+  await page.getByRole('tab', { name: 'Groovy Script' }).click();
 }
 
 // 4c) Another script starts with processData again, not with the function set for the previous one.
@@ -121,6 +131,38 @@ await page.locator('section.script').waitFor({ timeout: 10000 })
 await page.locator('section.input').getByRole('button', { name: 'Format' }).click();
 await page.locator('section.input .view-lines', { hasText: '"items": [' }).waitFor({ timeout: 5000 })
   .catch(() => fail('Format did not pretty-print the JSON input'));
+
+// 6b) Flow Steps with their sample settings: Content Modifier (XPath on the XML engine, Simple on Camel),
+// Router (CPI's Non-XML spelling) and General Splitter.
+await page.getByRole('tab', { name: 'Flow Steps' }).click();
+await page.getByRole('tab', { name: 'Content Modifier' }).click();
+await page.getByRole('button', { name: 'Run step' }).click();
+// Both the sample and the imported iFlow's Content Modifier set the header OrderId from /Order/@id.
+await page.locator('.res .row', { hasText: 'OrderId' }).filter({ hasText: '4711' }).waitFor({ timeout: 20000 })
+  .catch(() => fail('Content Modifier: header OrderId is not 4711'));
+await page.getByRole('tab', { name: 'Router' }).click();
+await page.getByRole('button', { name: 'Run step' }).click();
+await page.locator('.taken-line', { hasText: 'ERP' }).waitFor({ timeout: 10000 })
+  .catch(() => fail('Router did not take the ERP route'));
+await page.getByRole('tab', { name: 'Splitter' }).click();
+await page.getByRole('button', { name: 'Run step' }).click();
+await page.locator('.res h3', { hasText: '2 message(s)' }).waitFor({ timeout: 10000 })
+  .catch(() => fail('General Splitter did not create 2 messages'));
+// The split messages go to Gather; Combine writes SAP's multi-mapping format.
+await page.locator('.res h3').getByRole('button', { name: 'Gather' }).click();
+// Set explicitly: opening the iFlow's Gather (4b) loaded Combine at XPath.
+await page.getByLabel('Incoming Format').selectOption('sameXml');
+await page.getByLabel('Aggregation Algorithm').selectOption('combine');
+await page.getByRole('button', { name: 'Run step' }).click();
+await page.locator('.res pre', { hasText: 'multimap:Message1' }).waitFor({ timeout: 10000 })
+  .catch(() => fail('Gather did not combine the split messages'));
+await page.getByRole('tab', { name: 'Filter' }).click();
+await page.getByLabel('Filter XPath').fill('/Order/Item[@qty > 1]');
+await page.getByLabel('Value Type').selectOption('nodelist');
+await page.getByRole('button', { name: 'Run step' }).click();
+await page.locator('.res h3', { hasText: '1 item(s) selected' }).waitFor({ timeout: 10000 })
+  .catch(() => fail('Filter did not select the one item with qty > 1'));
+if (shots) await page.screenshot({ path: path.join(shots, 'g4-flow-steps.png') });
 
 // 7) Closing the project closes it in the engines too: runs no longer see its platform data.
 await page.getByTitle('Close project').click();

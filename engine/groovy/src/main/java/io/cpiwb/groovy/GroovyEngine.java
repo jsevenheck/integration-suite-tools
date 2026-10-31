@@ -21,6 +21,8 @@ public final class GroovyEngine implements RpcHandler {
     public static final String VERSION = "0.1.1";
 
     private final ScriptRunner runner;
+    private final SimpleStep simple = new SimpleStep();
+    private final ContentModifierStep contentModifier = new ContentModifierStep();
     private final String profile;
     private final ProjectFiles files = new ProjectFiles();
 
@@ -43,7 +45,7 @@ public final class GroovyEngine implements RpcHandler {
                 .with("java", System.getProperty("java.vm.name") + " " + System.getProperty("java.version"))
                 .with("nativeImage", false)
                 .with("types", TypedValue.TYPES)
-                .with("methods", List.of("engine.info", "groovy.run", "project.open", "project.close", "project.list", "file.read",
+                .with("methods", List.of("engine.info", "groovy.run", "simple.eval", "contentModifier.run", "project.open", "project.close", "project.list", "file.read",
                         "file.write", "file.delete", "iflow.import", "iflow.steps", "tests.run"));
     }
 
@@ -55,6 +57,10 @@ public final class GroovyEngine implements RpcHandler {
                 return describe();
             case "groovy.run":
                 return runner.run(withProjectRoot(params));
+            case "simple.eval":
+                return simple.run(params);
+            case "contentModifier.run":
+                return contentModifier.run(params);
             case "project.open":
                 return files.open(params);
             case "project.close":

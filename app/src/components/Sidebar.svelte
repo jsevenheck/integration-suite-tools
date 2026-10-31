@@ -1,4 +1,6 @@
 <script lang="ts">
+  const KIND: Record<string, string> = { groovy: 'G', xslt: 'X', xsd: 'V', contentModifier: 'C', filter: 'F', router: 'R', splitter: 'S', gather: 'A' };
+  const LABEL: Record<string, string> = { contentModifier: 'Content Modifier', filter: 'Filter', router: 'Router', splitter: 'Splitter', gather: 'Gather' };
   import { isDesktop, pickFolder, pickZip } from '../lib/engine';
   import { app, open, closeProject, openFile, mayDiscard, mayOverwrite, freePath, refreshFiles, writeFile, ask, xslt, xsd, groovy, SAMPLE_GROOVY_V1, SAMPLE_GROOVY_V2,
     importIflow, openIflowStep, loadIflowSteps, deleteFile, copyFile, useAsInput, fileView } from '../lib/store.svelte';
@@ -118,9 +120,9 @@
     <div class="steps" aria-label="iFlow steps">
       <div class="group static">iFlow steps <button class="icon" title="Rescan" onclick={() => { refreshFiles(); loadIflowSteps(); }}>↻</button></div>
       {#each app.iflowSteps as s}
-        <button class="file step" class:missing={!s.fileFound} title={`${s.iflow} · ${s.type}${s.componentVersion ? ' ' + s.componentVersion : ''} · ${s.file ?? ''}${s.note ? ' · ' + s.note : ''}`}
+        <button class="file step" class:missing={(s.type === 'groovy' || s.type === 'xslt' || s.type === 'xsd') && !s.fileFound} title={`${s.iflow} · ${LABEL[s.type] ?? s.type}${s.componentVersion ? ' ' + s.componentVersion : ''}${s.file ? ' · ' + s.file : ''}${s.note ? ' · ' + s.note : ''}`}
           onclick={() => openIflowStep(s)}>
-          <span class="kind {s.type}">{s.type === 'groovy' ? 'G' : s.type === 'xslt' ? 'X' : s.type === 'xsd' ? 'V' : '!'}</span>{s.name || s.id}
+          <span class="kind {s.type}">{KIND[s.type] ?? '!'}</span>{s.name || s.id}
         </button>
       {/each}
     </div>
@@ -188,5 +190,6 @@
   .kind.xslt { color: var(--accent); }
   .kind.xsd { color: var(--warn); }
   .kind.error { color: var(--err); }
+  .kind.contentModifier, .kind.filter, .kind.router, .kind.splitter, .kind.gather { color: var(--muted); }
   @media (max-width: 800px) { .side { width: 100%; border-right: none; border-bottom: 1px solid var(--border); max-height: 35vh; } }
 </style>

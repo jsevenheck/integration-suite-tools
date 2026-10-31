@@ -68,6 +68,13 @@
       <artifactId>camel-core-languages</artifactId>
       <version>3.14.7</version>
     </dependency>
+    <!-- OGNL calls in Simple (${header.x.split(',')[0]}, SAP's Content Modifier docs) need the bean language;
+         Camel 2's camel-core includes it. -->
+    <dependency>
+      <groupId>org.apache.camel</groupId>
+      <artifactId>camel-bean</artifactId>
+      <version>3.14.7</version>
+    </dependency>
     <dependency>
       <groupId>com.sun.activation</groupId>
       <artifactId>javax.activation</artifactId>

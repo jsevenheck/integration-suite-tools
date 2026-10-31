@@ -34,7 +34,7 @@ export const SAMPLE_INPUT = `<Order id="4711">
 </Order>
 `;
 
-export type StepTool = 'xslt' | 'groovy' | 'xsd' | 'xpath';
+export type StepTool = 'xslt' | 'groovy' | 'xsd' | 'xpath' | 'flow';
 
 export const app = $state({
   project: null as null | { root: string; files: FileEntry[] },
@@ -57,8 +57,10 @@ export interface IflowStep {
   iflow: string;
   id: string;
   name: string;
-  type: 'groovy' | 'xslt' | 'xsd' | 'error';
+  type: 'groovy' | 'xslt' | 'xsd' | FlowStep | 'error';
   note?: string;
+  /** Flow step settings (Content Modifier, Filter, Router, Splitter, Gather) as the iFlow stores them. */
+  config?: any;
   componentVersion?: string;
   file?: string;
   fileFound?: boolean;
@@ -168,10 +170,75 @@ export const xsd = $state({
 
 export const xpath = $state({
   expression: '//Item/@sku',
-  version: '1.0' as '1.0' | '3.1',
+  version: '3.1' as '1.0' | '3.1',
   namespaces: [] as Row[],
   body: SAMPLE_INPUT,
   result: null as null | { ok: boolean; items: any[]; count: number; diagnostics: Diagnostic[]; engine: string },
+  running: false,
+});
+
+export type FlowStep = 'contentModifier' | 'filter' | 'router' | 'splitter' | 'gather';
+
+/** A Content Modifier row in the iFlow's encoding (type: constant, header, property, xpath, expression, ...). */
+export interface CmRow {
+  action: 'Create' | 'Delete';
+  name: string;
+  type: string;
+  value: string;
+  datatype: string;
+  default: string;
+}
+
+export interface Route {
+  name: string;
+  expressionType: 'xml' | 'nonxml';
+  condition: string;
+  default: boolean;
+}
+
+export interface RouteResult {
+  status: 'true' | 'false' | 'error' | 'not evaluated' | 'default';
+  message?: string;
+  /** The Camel spelling of a Non-XML condition, when CPI's had to be rewritten. */
+  camel?: string;
+}
+
+export const flow = $state({
+  step: 'contentModifier' as FlowStep,
+  /**
+   * The Camel line, from the Groovy engine that carries it. These steps have no Groovy version: the Camel
+   * line belongs to the tenant, and SAP has moved tenants to Camel 3.14 (F34), hence the default.
+   */
+  camel: 'groovy-2.x' as Profile,
+  /** The iFlow step each step's settings came from, if any. */
+  sources: {} as Partial<Record<FlowStep, string>>,
+  body: SAMPLE_INPUT,
+  headers: [{ name: 'SenderId', value: 'ERP_100', type: 'String' }] as Row[],
+  properties: [] as Row[],
+  cm: {
+    headers: [{ action: 'Create', name: 'OrderId', type: 'xpath', value: '/Order/@id', datatype: 'java.lang.String', default: '' }] as CmRow[],
+    properties: [{ action: 'Create', name: 'Key', type: 'expression', value: '${header.SenderId}-${header.OrderId}', datatype: '', default: '' }] as CmRow[],
+    bodyType: 'constant' as 'constant' | 'expression',
+    body: '',
+  },
+  router: {
+    routes: [
+      { name: 'ERP', expressionType: 'nonxml', condition: "${header.SenderId} = 'ERP_100'", default: false },
+      { name: 'Large order', expressionType: 'xml', condition: 'count(/Order/Item) > 5', default: false },
+      { name: 'Default', expressionType: 'xml', condition: '', default: true },
+    ] as Route[],
+    throwException: false,
+  },
+  splitter: { splitter: 'general' as 'general' | 'iterating', expressionType: 'xpath' as 'xpath' | 'token' | 'lineBreak',
+    expression: '/Order/Item', grouping: '', streaming: true },
+  filter: { expression: "/Order/Item[@qty > 1]", valueType: 'nodelist' },
+  /** The messages to gather: a splitter's result or bodies added by hand. */
+  gather: { messageType: 'sameXml', algorithm: 'combine', sourceXPath: '', targetXPath: '', messages: [] as string[] },
+  cmResult: null as any,
+  routerResult: null as null | { routes: RouteResult[]; taken: string; diagnostics: string[] },
+  splitResult: null as any,
+  filterResult: null as any,
+  gatherResult: null as any,
   running: false,
 });
 
@@ -285,11 +352,12 @@ export async function importIflow(zip: string) {
   const r = await call('iflow.import', { zip });
   if (app.project) app.project.files = r.fileList;
   app.iflowSteps = r.steps;
-  app.status = `Imported ${r.imported} (${r.files} files, ${r.steps.length} script/XSLT steps found)`;
+  app.status = `Imported ${r.imported} (${r.files} files, ${r.steps.length} steps found)`;
 }
 
 /** Opens the file of an imported iFlow step with the step's settings (function, script version). */
 export async function openIflowStep(step: IflowStep) {
+  if (step.config) return openFlowStep(step);
   if (!step.file || !step.fileFound) {
     app.error = step.note ? `Step "${step.name}": ${step.note}`
       : `The file of step "${step.name}" was not found in the export (${step.file ?? 'no reference'}).`;
@@ -414,19 +482,21 @@ export async function saveFileView(): Promise<boolean> {
 }
 
 function stepBody(tool: StepTool) {
-  return tool === 'xsd' ? xsd.body : tool === 'xpath' ? xpath.body : tool === 'groovy' ? groovy.body : xslt.body;
+  return tool === 'xsd' ? xsd.body : tool === 'xpath' ? xpath.body : tool === 'flow' ? flow.body
+    : tool === 'groovy' ? groovy.body : xslt.body;
 }
 
 function setInput(path: string, content: string) {
-  // XSLT, XSD and XPath read XML only; a JSON body can only feed a Groovy script.
+  // XSLT, XSD and XPath read XML only; a JSON body can only feed a Groovy script (or the Flow Steps, on the same engine).
   const json = /\.json$/i.test(path) || /^\s*[[{]/.test(content);
   if (json && !app.profiles.some((p) => p.kind === 'groovy' && p.available)) {
     app.error = `${path} is JSON: only a Groovy script takes a JSON body, and no Groovy engine is available.`;
     return;
   }
-  const tool: StepTool = json ? 'groovy' : app.stepTool;
+  const tool: StepTool = json && app.stepTool !== 'flow' ? 'groovy' : app.stepTool;
   if (tool === 'xsd') xsd.body = content;
   else if (tool === 'xpath') xpath.body = content;
+  else if (tool === 'flow') flow.body = content;
   else if (tool === 'groovy') groovy.body = content;
   else xslt.body = content;
   app.inputPaths[tool] = path;
@@ -752,6 +822,172 @@ export async function runXpath() {
   } finally {
     xpath.running = false;
   }
+}
+
+// ------------------------------------------------------------------ flow steps
+// XPath runs in the XML engine (Saxon, XPath 3.1 as SAP documents for the Content Modifier), Camel Simple and
+// the Content Modifier in the Groovy engine's Camel. The Router is evaluated here, route by route.
+
+function namespaceMap() {
+  const ns: Record<string, string> = {};
+  for (const r of xpath.namespaces) if (r.name.trim() && !r.disabled) ns[r.name.trim()] = r.value;
+  return ns;
+}
+
+/** XPath and the splitter use CPI's Saxon line (9.9) when it is installed, whatever the XSLT tab is set to. */
+function flowXmlProfile(): Profile {
+  return hasProfile('saxon-he-9.9') ? 'saxon-he-9.9' : app.profile;
+}
+
+function flowInput() {
+  return { body: flow.body, headers: clean(flow.headers), properties: clean(flow.properties) };
+}
+
+async function xpathValue(expression: string, as: 'boolean' | 'string' | 'nodes') {
+  // Headers and properties are XPath variables ($name), as in CPI's Camel.
+  const r = await call('xpath.eval', { expression, version: '3.1', as, namespaces: namespaceMap(), input: flowInput() }, flowXmlProfile());
+  if (!r.ok) throw new Error(r.diagnostics?.[0]?.message ?? 'XPath failed');
+  return r.value as string;
+}
+
+async function simpleEval(expression: string, mode: 'condition' | 'expression') {
+  const r = await call('simple.eval', { expression, mode, input: flowInput() }, flow.camel);
+  if (!r.ok) throw new Error(r.diagnostics?.[0]?.message ?? 'Camel Simple failed');
+  return r as { value: string | null; evaluated?: string };
+}
+
+export async function runFlowStep() {
+  flow.running = true;
+  app.error = '';
+  try {
+    if (flow.step === 'contentModifier') await runContentModifier();
+    else if (flow.step === 'filter') await runFilter();
+    else if (flow.step === 'router') await runRouter();
+    else if (flow.step === 'splitter') await runSplitter();
+    else await runGather();
+  } catch (e) {
+    fail(e);
+  } finally {
+    flow.running = false;
+  }
+}
+
+async function runContentModifier() {
+  // XPath rows read the incoming body, which the step changes only after all header and property rows.
+  const rows = async (list: CmRow[]) => Promise.all(list.map(async (r) => {
+    if (r.action !== 'Create' || r.type !== 'xpath') return { ...r };
+    try {
+      return { ...r, resolved: await xpathValue(r.value, r.datatype.startsWith('org.w3c.dom.') ? 'nodes' : 'string') };
+    } catch (e) {
+      throw new Error(`XPath of ${r.name}: ${(e as Error).message}`);
+    }
+  }));
+  flow.cmResult = await call('contentModifier.run', {
+    headers: await rows(flow.cm.headers), properties: await rows(flow.cm.properties),
+    bodyType: flow.cm.bodyType, body: flow.cm.body, input: flowInput(),
+  }, flow.camel);
+}
+
+async function runRouter() {
+  const routes: RouteResult[] = flow.router.routes.map((r) => ({ status: r.default ? 'default' : 'not evaluated' }));
+  let taken = '';
+  for (const [i, r] of flow.router.routes.entries()) {
+    if (r.default) continue;
+    try {
+      const s = r.expressionType === 'xml' ? { value: await xpathValue(r.condition, 'boolean') } : await simpleEval(r.condition, 'condition');
+      routes[i] = { status: s.value === 'true' ? 'true' : 'false', camel: (s as { evaluated?: string }).evaluated };
+    } catch (e) {
+      routes[i] = { status: 'error', message: (e as Error).message };
+      taken = 'Error: the route condition failed, so CPI raises an exception.';
+      break;
+    }
+    if (routes[i].status === 'true') {
+      taken = r.name;
+      break;
+    }
+  }
+  if (!taken) {
+    const d = flow.router.routes.find((r) => r.default);
+    taken = flow.router.throwException ? 'No route matched: Throw Exception is set, so the Router raises an exception.'
+      : d ? d.name + ' (default route)' : 'No route matched and there is no default route.';
+  }
+  flow.routerResult = { routes, taken, diagnostics: [] };
+}
+
+async function runSplitter() {
+  // XPath and grouping may refer to a header or property (SAP); Camel Simple resolves the reference first.
+  const resolve = async (v: string) => (v.includes('${') ? (await simpleEval(v, 'expression')).value ?? '' : v);
+  const s = flow.splitter;
+  flow.splitResult = await call('split.run', {
+    splitter: s.splitter, expressionType: s.expressionType, expression: await resolve(s.expression),
+    grouping: await resolve(String(s.grouping ?? '')), streaming: s.streaming, namespaces: namespaceMap(), input: { body: flow.body },
+  }, flowXmlProfile());
+}
+
+/** SAP: `function:simple('${property.x}')` in a Filter XPath; Camel Simple gives the value, as an XPath string. */
+async function resolveSimpleFunctions(xpathExpr: string) {
+  let out = xpathExpr;
+  for (const m of xpathExpr.matchAll(/function:simple\(\s*(?:'([^']*)'|"([^"]*)")\s*\)/g)) {
+    const v = (await simpleEval(m[1] ?? m[2], 'expression')).value ?? '';
+    out = out.replace(m[0], "'" + v.replaceAll("'", "''") + "'");
+  }
+  return out;
+}
+
+async function runFilter() {
+  flow.filterResult = await call('filter.run', {
+    expression: await resolveSimpleFunctions(flow.filter.expression), valueType: flow.filter.valueType,
+    namespaces: namespaceMap(), input: flowInput(),
+  }, flowXmlProfile());
+}
+
+async function runGather() {
+  const g = flow.gather;
+  flow.gatherResult = await call('gather.run', {
+    messageType: g.messageType, algorithm: g.algorithm, sourceXPath: g.sourceXPath, targetXPath: g.targetXPath,
+    namespaces: namespaceMap(), messages: g.messages,
+  }, flowXmlProfile());
+}
+
+/** The splitter's messages go to the Gather step, as in an iFlow's Splitter → … → Gather. */
+export function gatherSplitResult() {
+  flow.gather.messages = (flow.splitResult?.messages ?? []).map((m: { body: string }) => m.body);
+  flow.gatherResult = null;
+  flow.step = 'gather';
+}
+
+/** A result message becomes the next input, to try steps one after another. */
+export function useAsFlowInput(body: string, headers?: Row[], properties?: Row[]) {
+  flow.body = body;
+  if (headers) flow.headers = headers.map((r) => ({ ...r }));
+  if (properties) flow.properties = properties.map((r) => ({ ...r }));
+  delete app.inputPaths.flow;
+}
+
+function openFlowStep(step: IflowStep) {
+  const c = step.config ?? {};
+  const row = (r: any): CmRow => ({ action: r.action === 'Delete' ? 'Delete' : 'Create', name: r.name ?? '', type: r.type ?? 'constant',
+    value: r.value ?? '', datatype: r.datatype ?? '', default: r.default ?? '' });
+  if (step.type === 'contentModifier') {
+    flow.cm = { headers: (c.headers ?? []).map(row), properties: (c.properties ?? []).map(row),
+      bodyType: c.bodyType === 'expression' ? 'expression' : 'constant', body: c.body ?? '' };
+  } else if (step.type === 'router') {
+    flow.router = { routes: c.routes ?? [], throwException: !!c.throwException };
+  } else if (step.type === 'filter') {
+    flow.filter = { expression: c.expression ?? '', valueType: c.valueType ?? 'nodelist' };
+  } else if (step.type === 'gather') {
+    // The messages stay: they come from the splitter, not from the iFlow.
+    flow.gather = { ...flow.gather, messageType: c.messageType ?? 'sameXml', algorithm: c.algorithm ?? 'combine',
+      sourceXPath: c.sourceXPath ?? '', targetXPath: c.targetXPath ?? '' };
+  } else {
+    flow.splitter = { splitter: c.splitter, expressionType: c.expressionType, expression: c.expression ?? '',
+      grouping: c.grouping ?? '', streaming: c.streaming !== false };
+  }
+  flow.step = step.type as FlowStep;
+  flow.sources[step.type as FlowStep] = `${step.iflow} · ${step.name || step.id}`;
+  flow.cmResult = flow.routerResult = flow.splitResult = flow.filterResult = flow.gatherResult = null;
+  app.tool = 'flow';
+  app.status = `Loaded ${step.name || step.id} from ${step.iflow}`;
 }
 
 export async function formatXml(text: string): Promise<string> {

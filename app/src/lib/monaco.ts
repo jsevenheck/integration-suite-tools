@@ -19,6 +19,13 @@ import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
   },
 };
 
+// Disposing an editor (switching views) cancels Monaco's pending work, which can reject with its
+// CancellationError where no one awaits it. Monaco itself treats it as expected, not as an error; the
+// check is the one of its isCancellationError (vs/base/common/errors).
+window.addEventListener('unhandledrejection', (e) => {
+  if (e.reason instanceof Error && e.reason.name === 'Canceled' && e.reason.message === 'Canceled') e.preventDefault();
+});
+
 const dark = window.matchMedia('(prefers-color-scheme: dark)');
 const applyTheme = () => monaco.editor.setTheme(dark.matches ? 'vs-dark' : 'vs');
 dark.addEventListener('change', applyTheme);

@@ -36,10 +36,29 @@ Download the installer for your platform from the
   the app has no test runner. Opening a `case.json` loads the case into its editor view. Inputs only
   a case file can hold (attachments, SOAP headers, platform overrides) are kept while the case is
   open and are shown below the input.
-* **XSD** validates a document against a schema; **XPath** evaluates an expression (1.0 or 3.1).
+* **XSD** validates a document against a schema; **XPath** evaluates an expression (3.1 by default, or 1.0).
+* **Flow Steps** runs a **Content Modifier**, **Filter**, **Router**, **General / Iterating Splitter** or
+  **Gather** on an input message (body, headers, properties, namespace mapping):
+  * Content Modifier: header and property rows with their source types and data types, and the
+    message body; the result shows each row's value and the output message.
+  * Router: routes in order, XML (XPath) or Non-XML (Camel Simple, with CPI's `=`, `and`, `or` and
+    `${property.x}`) conditions, default route; the result shows which route the message takes.
+  * Filter: an XPath and its Value Type (String, Integer, Boolean, Node, Nodelist); the result is the
+    new body. `function:simple('${property.x}')` takes the value from Camel Simple.
+  * Splitter: XPath, Line Break or Token, grouping; the result lists the messages. *Gather* passes them on.
+  * Gather: Combine (SAP's multi-mapping format), Combine at XPath or Concatenate of the messages from
+    the splitter or added by hand.
+
+  In XPath, `$name` is the header of that name, else the exchange property, as in CPI.
+
+  These steps have no Groovy version: *Camel* in the top bar picks the tenant's Camel line (3.14
+  for tenant software 7.x / 8.x, the default; 2.24 for 5.x / 6.x). XPath runs on Saxon-HE 9.9. *Use as input* passes a result on to the next step. See
+  [Fidelity](fidelity.md#flow-steps-content-modifier-filter-router-splitter-gather).
 * **Import iFlow** unpacks an iFlow exported from Integration Suite (zip) into `iflows/` and lists
-  its Groovy Script, XSLT Mapping and XML Validator steps. Clicking a step opens its file with the
-  step's function name and script version. Steps that choose their mapping from a header at runtime
+  its Groovy Script, XSLT Mapping, XML Validator, Content Modifier, Filter, Router, Splitter and Gather steps.
+  Clicking a script or mapping step opens its file with the step's function name and script
+  version; a Content Modifier, Filter, Router, Splitter or Gather opens in Flow Steps with its settings, with
+  `{{parameters}}` filled in from the iFlow's `parameters.prop`. Steps that choose their mapping from a header at runtime
   are marked. The `.iflw` format is not publicly documented, so this is read generically (best effort).
 * **Lint** shows hints about what breaks when a script moves from 1.x to 2.x:
   * `XmlSlurper` or `XmlParser` used without a `groovy.xml` import,
@@ -61,7 +80,7 @@ The installers are not code-signed yet; [Installing](install.md) shows how to st
 first time. The Windows `setup.exe` installs per user and needs no admin rights; the `.msi` installs
 per machine and needs admin rights.
 
-The Groovy runtime starts only when the Groovy tab is used and stops after 10 idle minutes.
+The Groovy runtime starts only when the Groovy or Flow Steps tab is used and stops after 10 idle minutes.
 
 ## Command line (CI-friendly)
 

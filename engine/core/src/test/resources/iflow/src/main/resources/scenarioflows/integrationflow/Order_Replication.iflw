@@ -47,10 +47,60 @@
         <ifl:property><key>xmlSchemaSource</key><value>/xsd/order.xsd</value></ifl:property>
       </bpmn2:extensionElements>
     </bpmn2:callActivity>
+    <!-- Content Modifier, Splitter, Filter, Gather and Router keys as seen in SAP's public sample iFlows (synthetic values). -->
     <bpmn2:callActivity id="CallActivity_3" name="Set headers">
       <bpmn2:extensionElements>
+        <ifl:property><key>bodyType</key><value>expression</value></ifl:property>
+        <ifl:property><key>propertyTable</key><value>&lt;row&gt;&lt;cell id='Action'&gt;Create&lt;/cell&gt;&lt;cell id='Type'&gt;constant&lt;/cell&gt;&lt;cell id='Value'&gt;{{LogLevel}}&lt;/cell&gt;&lt;cell id='Default'&gt;&lt;/cell&gt;&lt;cell id='Name'&gt;P_Log&lt;/cell&gt;&lt;cell id='Datatype'&gt;&lt;/cell&gt;&lt;/row&gt;</value></ifl:property>
+        <ifl:property><key>headerTable</key><value>&lt;row&gt;&lt;cell id='Action'&gt;Create&lt;/cell&gt;&lt;cell id='Type'&gt;xpath&lt;/cell&gt;&lt;cell id='Value'&gt;//Order/@id&lt;/cell&gt;&lt;cell id='Default'&gt;&lt;/cell&gt;&lt;cell id='Name'&gt;OrderId&lt;/cell&gt;&lt;cell id='Datatype'&gt;java.lang.String&lt;/cell&gt;&lt;/row&gt;&lt;row&gt;&lt;cell id='Action'&gt;Delete&lt;/cell&gt;&lt;cell id='Type'&gt;constant&lt;/cell&gt;&lt;cell id='Value'&gt;&lt;/cell&gt;&lt;cell id='Default'&gt;&lt;/cell&gt;&lt;cell id='Name'&gt;$include=X-*&lt;/cell&gt;&lt;cell id='Datatype'&gt;&lt;/cell&gt;&lt;/row&gt;</value></ifl:property>
+        <ifl:property><key>wrapContent</key><value>&lt;Wrapped&gt;${in.body}&lt;/Wrapped&gt;</value></ifl:property>
+        <ifl:property><key>componentVersion</key><value>1.6</value></ifl:property>
         <ifl:property><key>activityType</key><value>Enricher</value></ifl:property>
       </bpmn2:extensionElements>
     </bpmn2:callActivity>
+    <bpmn2:callActivity id="CallActivity_7" name="Split items">
+      <bpmn2:extensionElements>
+        <ifl:property><key>exprType</key><value>XPath</value></ifl:property>
+        <ifl:property><key>Streaming</key><value>true</value></ifl:property>
+        <ifl:property><key>splitExprValue</key><value>/Order/Item/</value></ifl:property>
+        <ifl:property><key>activityType</key><value>Splitter</value></ifl:property>
+        <ifl:property><key>grouping</key><value>{{GroupSize}}</value></ifl:property>
+        <ifl:property><key>splitType</key><value>GeneralSplitter</value></ifl:property>
+      </bpmn2:extensionElements>
+    </bpmn2:callActivity>
+    <bpmn2:callActivity id="CallActivity_8" name="Gather items">
+      <bpmn2:extensionElements>
+        <ifl:property><key>gatherFileNames</key><value/></ifl:property>
+        <ifl:property><key>sourceXPath</key><value>/Order/Item</value></ifl:property>
+        <ifl:property><key>targetXPath</key><value/></ifl:property>
+        <ifl:property><key>componentVersion</key><value>1.2</value></ifl:property>
+        <ifl:property><key>messageType</key><value>SameXMLFormat</value></ifl:property>
+        <ifl:property><key>activityType</key><value>Gather</value></ifl:property>
+        <ifl:property><key>aggregationAlgorithm</key><value>xpath-merge-strategy</value></ifl:property>
+      </bpmn2:extensionElements>
+    </bpmn2:callActivity>
+    <bpmn2:callActivity id="CallActivity_9" name="Keep items">
+      <bpmn2:extensionElements>
+        <ifl:property><key>xpathType</key><value>Nodelist</value></ifl:property>
+        <ifl:property><key>componentVersion</key><value>1.1</value></ifl:property>
+        <ifl:property><key>activityType</key><value>Filter</value></ifl:property>
+        <ifl:property><key>wrapContent</key><value>/Order/Item</value></ifl:property>
+      </bpmn2:extensionElements>
+    </bpmn2:callActivity>
+    <bpmn2:exclusiveGateway default="SequenceFlow_9" id="ExclusiveGateway_1" name="Check sender">
+      <bpmn2:extensionElements>
+        <ifl:property><key>activityType</key><value>ExclusiveGateway</value></ifl:property>
+        <ifl:property><key>throwException</key><value>false</value></ifl:property>
+      </bpmn2:extensionElements>
+      <bpmn2:outgoing>SequenceFlow_8</bpmn2:outgoing>
+      <bpmn2:outgoing>SequenceFlow_9</bpmn2:outgoing>
+    </bpmn2:exclusiveGateway>
+    <bpmn2:sequenceFlow id="SequenceFlow_9" name="Other" sourceRef="ExclusiveGateway_1" targetRef="CallActivity_1">
+      <bpmn2:extensionElements><ifl:property><key>expressionType</key><value>XML</value></ifl:property></bpmn2:extensionElements>
+    </bpmn2:sequenceFlow>
+    <bpmn2:sequenceFlow id="SequenceFlow_8" name="ERP" sourceRef="ExclusiveGateway_1" targetRef="CallActivity_2">
+      <bpmn2:extensionElements><ifl:property><key>expressionType</key><value>NonXML</value></ifl:property></bpmn2:extensionElements>
+      <bpmn2:conditionExpression xsi:type="bpmn2:tFormalExpression" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">${header.SenderId} = 'ERP'</bpmn2:conditionExpression>
+    </bpmn2:sequenceFlow>
   </bpmn2:process>
 </bpmn2:definitions>

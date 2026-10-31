@@ -436,7 +436,7 @@ public final class ScriptRunner {
 
     // ---------------------------------------------------------------- output
 
-    private static Json.Obj describeOutput(Exchange exchange, Charset charset, List<Diagnostic> diags) {
+    static Json.Obj describeOutput(Exchange exchange, Charset charset, List<Diagnostic> diags) {
         Object body = exchange.getIn().getBody();
         String text;
         String bodyClass = body == null ? "null" : body.getClass().getName();

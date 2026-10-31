@@ -19,8 +19,9 @@ The desktop shell starts each engine as a sidecar process on demand and talks JS
 over stdio. Every engine can also serve HTTP on localhost (`serve --http <port>`) for the
 browser mode. The main methods are:
 
-* `xslt.run`, `xsd.validate`, `xpath.eval` (XML engines),
-* `groovy.run` (Groovy engines),
+* `xslt.run`, `xsd.validate`, `xpath.eval`, `split.run`, `filter.run`, `gather.run` (XML engines),
+* `groovy.run`, `simple.eval`, `contentModifier.run` (Groovy engines); the UI evaluates a Router
+  route by route with `xpath.eval` and `simple.eval`,
 * `tests.run`, and `project.*`, `file.*`, `iflow.*` for files (all engines).
 
 File methods and XML runs stay inside the open project (`ProjectFiles`, `ProjectResolver`). Over

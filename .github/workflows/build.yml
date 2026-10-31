@@ -43,6 +43,8 @@ jobs:
             engine/xml-he12/target/cpiwb-xml-he12.jar
             engine/groovy-v1/target/cpiwb-groovy-v1.jar
             engine/groovy-v2/target/cpiwb-groovy-v2.jar
+          # Only the release job of the same run needs them; the release keeps its own copies.
+          retention-days: 3
           if-no-files-found: error
 
   desktop:
@@ -146,6 +148,8 @@ jobs:
             app/src-tauri/target/release/bundle/**/*.rpm
             app/src-tauri/target/release/bundle/**/*.deb
           if-no-files-found: warn
+          # Branch builds are for a quick test; a release keeps its installers as release assets too.
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 90 || 3 }}
 
   ui-e2e:
     needs: engine-tests
@@ -180,7 +184,9 @@ jobs:
           cp -r testdata/regression-project "$demo"
           node app/e2e/smoke.mjs "$demo"
           rm -rf "$demo" && cp -r testdata/regression-project "$demo"
-          node app/e2e/groovy.mjs "$demo"
+          # The iFlow fixture as an exported zip: groovy.mjs imports it and opens its steps.
+          jar --create --no-manifest --file "$tmp/iflow.zip" -C engine/core/src/test/resources/iflow .
+          CPIWB_IFLOW_ZIP="$tmp/iflow.zip" node app/e2e/groovy.mjs "$demo"
 
   # A pushed tag v<version> publishes a GitHub release with the installers and engine jars, once
   # every build and test job is green. The tag must match the app version (app/scripts/set-version.mjs).

@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Properties;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -140,10 +141,16 @@ public final class IflowImport {
         f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
         Document doc = f.newDocumentBuilder().parse(model.toFile());
         List<Object> out = new ArrayList<>();
+        Properties params = parameters(flowRoot);
         NodeList all = doc.getElementsByTagNameNS("*", "callActivity");
         for (int i = 0; i < all.getLength(); i++) {
             Element act = (Element) all.item(i);
             Map<String, String> props = properties(act);
+            Json.Obj flowStep = FlowSteps.of(act, props, params);
+            if (flowStep != null) {
+                out.add(flowStep.with("iflow", flowRoot.getFileName().toString()));
+                continue;
+            }
             String type = classify(props);
             if (type == null) {
                 continue;
@@ -175,11 +182,28 @@ public final class IflowImport {
             }
             out.add(step);
         }
+        NodeList gateways = doc.getElementsByTagNameNS("*", "exclusiveGateway");
+        for (int i = 0; i < gateways.getLength(); i++) {
+            Element gw = (Element) gateways.item(i);
+            out.add(FlowSteps.router(doc, gw, properties(gw), params).with("iflow", flowRoot.getFileName().toString()));
+        }
         return out;
     }
 
+    /** The iFlow's externalized parameters (src/main/resources/parameters.prop), if it has them. */
+    private static Properties parameters(Path flowRoot) throws IOException {
+        Properties p = new Properties();
+        Path file = flowRoot.resolve("src/main/resources/parameters.prop");
+        if (Files.isRegularFile(file)) {
+            try (InputStream in = Files.newInputStream(file)) {
+                p.load(in);
+            }
+        }
+        return p;
+    }
+
     /** ifl:property children: {@code <key>..</key><value>..</value>}. */
-    private static Map<String, String> properties(Element act) {
+    static Map<String, String> properties(Element act) {
         Map<String, String> props = new LinkedHashMap<>();
         NodeList ps = act.getElementsByTagNameNS("*", "property");
         for (int j = 0; j < ps.getLength(); j++) {

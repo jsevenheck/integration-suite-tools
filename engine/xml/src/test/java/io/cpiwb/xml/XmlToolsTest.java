@@ -79,6 +79,21 @@ class XmlToolsTest {
     }
 
     @Test
+    void xpathValuesForFlowSteps() {
+        XPathStep x = new XPathStep();
+        Map<String, Object> in = Json.o().with("body", "<ns:ORDERS05 xmlns:ns='urn:i'><IDOC><DOCNUM>42</DOCNUM><E>a</E><E>b</E></IDOC></ns:ORDERS05>");
+        java.util.function.BiFunction<String, String, Object> eval = (expr, as) -> x.run(Json.o().with("expression", expr)
+                .with("version", "3.1").with("as", as).with("input", in)).get("value");
+        // Router conditions as written in real iFlows (XPath 2.0+ syntax).
+        assertEquals("true", eval.apply("boolean(/node()/*:IDOC[1][1=last()])", "boolean"));
+        assertEquals("true", eval.apply("//DOCNUM", "boolean"));
+        assertEquals("false", eval.apply("count(//E) = 0", "boolean"));
+        assertEquals("42", eval.apply("//DOCNUM/text()", "string"));
+        assertEquals("a", eval.apply("//E", "string"));
+        assertEquals("<E xmlns:ns=\"urn:i\">a</E><E xmlns:ns=\"urn:i\">b</E>", eval.apply("//E", "nodes"));
+    }
+
+    @Test
     void format() {
         Map<String, Object> r = new XPathStep().format(Json.o().with("text", "<a><b>1</b></a>"));
         assertTrue(Json.str(r, "text", "").contains("\n   <b>1</b>"), () -> Json.write(r));
